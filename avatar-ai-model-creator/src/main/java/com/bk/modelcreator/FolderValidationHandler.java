@@ -1,31 +1,39 @@
 package com.bk.modelcreator;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.nio.file.*;
 import java.io.IOException;
-import java.util.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class FolderValidator {
-
+public class FolderValidationHandler implements EventHandler<FolderSelectedEvent>{
     private static final Set<String> VALID_EXTENSIONS = Set.of(
-      "jpg", "jpeg", "png"
+            "jpg", "jpeg", "png"
     );
+
+    private EventBus eventBus;
+
+    private PropertiesManager propertiesManager;
+
+    private ApplicationState applicationState;
 
     /**
      * At least 2 labels are required for the image classification model to be troined
      */
     private static final int MIN_DIRECTORIES = 2;
-    private ModifiedTextArea textArea;
 
-    public FolderValidator(ModifiedTextArea textArea)
+    public FolderValidationHandler(EventBus eventBus, PropertiesManager propertiesManager, ApplicationState applicationState)
     {
-        this.textArea = textArea;
+        this.eventBus = eventBus;
+        this.propertiesManager = propertiesManager;
+        this.applicationState = applicationState;
+        eventBus.subscribe(FolderSelectedEvent.class, this);
     }
 
     /**
@@ -43,7 +51,6 @@ public class FolderValidator {
 
         // Ensure that the root path is a directory
         if (!Files.isDirectory(rootPath)) {
-            textArea.appendText("Root path is not a directory");
             return false;
         }
 
@@ -75,15 +82,6 @@ public class FolderValidator {
             isValid.set(false);
         }
 
-        if (isValid.get() == false)
-        {
-            textArea.appendText("Please ensure that your subdirectories are not more than " +
-                    "one layer deep, have only .png or .jpeg images and are named " +
-                    "after the exhibits ");
-        }
-
-        System.out.println("Count is:" + subDirectoryCount.get());
-
         return isValid.get() && hasSubdirectory.get() && (subDirectoryCount.get() >= MIN_DIRECTORIES);
     }
 
@@ -99,16 +97,6 @@ public class FolderValidator {
 
         List<String> subfolderNames = getSubfolderNames(directoryPath);
         List<String> exhibitionNames = getExhibitionNamesFromDatabase(databasePath);
-
-        for (String exhibitionName: exhibitionNames)
-        {
-            System.out.println("Exhibition name: " + exhibitionName);
-        }
-
-        for (String subfolder: subfolderNames)
-        {
-            System.out.println("Subfolder name: " + subfolder);
-        }
 
         // Compare the two lists
         for (String folder : subfolderNames) {
@@ -152,5 +140,21 @@ public class FolderValidator {
         }
         return exhibitionNames;
     }
-}
+    @Override
+    public void handle(FolderSelectedEvent event) {
 
+        if (event.getDirectoryPath() == null)
+        {
+            return;
+        }
+
+        if (hasValidFolderNames(event.getDirectoryPath(), event.getDatabasePath()) && hasValidStructure(event.getDirectoryPath()))
+        {
+            eventBus.publish(new ValidFolderSelectedEvent());
+        }
+
+        else{
+            eventBus.publish(new InvalidFolderSelectedEvent());
+        }
+    }
+}

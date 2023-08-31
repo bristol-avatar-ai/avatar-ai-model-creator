@@ -1,33 +1,42 @@
 package com.bk.modelcreator;
 
-
-import com.google.api.gax.longrunning.OperationFuture;
-import com.google.cloud.compute.v1.*;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.auth.Credentials;
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.api.gax.longrunning.OperationFuture;
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.compute.v1.*;
 
 import java.io.FileInputStream;
-import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
-public class VMStarter {
+public class VMStartHandler implements EventHandler<UploadFinishedEvent>{
+
     private String jsonPath;
     private String project;
     private String zone;
     private String instanceName;
-    public VMStarter(Properties properties)
+    private EventBus eventBus;
+    private PropertiesManager propertiesManager;
+    private ApplicationState applicationState;
+
+    public VMStartHandler(EventBus eventBus, PropertiesManager propertiesManager, ApplicationState applicationState)
     {
-        this.jsonPath = properties.getProperty("vmStarterJSON");
-        this.project = properties.getProperty("projectID");
-        this.zone = properties.getProperty("vmZone");
-        this.instanceName = properties.getProperty("vmInstanceName");
+        this.eventBus = eventBus;
+        this.propertiesManager = propertiesManager;
+        this.applicationState = applicationState;
+
+        eventBus.subscribe(UploadFinishedEvent.class, this);
     }
 
-    public String startAndGetIP(ModifiedTextArea textArea)
+    private String startAndGetIP()
     {
         try
         {
+            this.jsonPath = propertiesManager.getProperty("vmStarterJSON");
+            this.project = propertiesManager.getProperty("projectID");
+            this.zone = propertiesManager.getProperty("vmZone");
+            this.instanceName = propertiesManager.getProperty("vmInstanceName");
+
             // Load the credentials from the JSON key file
             FileInputStream serviceAccountStream = new FileInputStream(jsonPath);
             Credentials credentials = GoogleCredentials.fromStream(serviceAccountStream);
@@ -49,13 +58,12 @@ public class VMStarter {
             OperationFuture<Operation, Operation> operation = instancesClient.startAsync(
                     startInstanceRequest);
 
-            textArea.appendText("Attempting to start VM - please wait...");
+            eventBus.publish(new GenericMessageEvent("Attempting to start VM - please wait..."));
 
             // Wait for the operation to complete.
             Operation response = operation.get(3, TimeUnit.MINUTES);
 
             if (response.getStatus() == Operation.Status.DONE) {
-                textArea.appendText("Instance started successfully!");
 
                 Instance instance = instancesClient.get(project, zone, instanceName);
 
@@ -69,12 +77,24 @@ public class VMStarter {
 
         catch (Exception exception)
         {
-            textArea.appendText(exception.getMessage() + System.lineSeparator());
-            textArea.appendText("Encountered above bug; please contact developers");
+            eventBus.publish(new ErrorEvent("Could not start VM"));
         }
 
         return null;
     }
+    @Override
+    public void handle(UploadFinishedEvent event)
+    {
+        String ipAddress = startAndGetIP();
 
+        if (ipAddress != null)
+        {
+            eventBus.publish(new VMStartedEvent(ipAddress));
+        }
+
+        else
+        {
+            eventBus.publish(new ErrorEvent("VM failed to start"));
+        }
+    }
 }
-

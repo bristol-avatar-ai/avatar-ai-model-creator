@@ -11,10 +11,12 @@ import javafx.beans.property.StringProperty;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Properties;
 
-public class PropertiesWindowController {
+public class PropertiesWindowController{
+    private EventBus eventBus;
+    private PropertiesManager propertiesManager;
+    private ApplicationState applicationState;
     private final StringProperty selectedFilePath = new SimpleStringProperty(null);
     @FXML
     private TextField selectFileTextField;
@@ -23,9 +25,7 @@ public class PropertiesWindowController {
     private static final String PROMPT = "Click and select a .properties file";
     @FXML
     public void initialize() {
-        loadFileButton.setDisable(true);
-
-        // Add a listener that updates the UI when the selectedFilePath changes
+        // A listener that updates the UI when the selectedFilePath changes
         selectedFilePath.addListener((observable, oldValue, newValue) -> {
             if (newValue != null) {
                 selectFileTextField.setText(newValue);
@@ -86,21 +86,20 @@ public class PropertiesWindowController {
             // Load the .properties file
             properties.load(fileInputStream);
 
-            if (!checkProperties(properties))
+            if (checkProperties(properties))
             {
-                GlobalEventBus.getInstance().post(new PropertiesFileLoadedEvent(false, "Invalid properties", null));
-
+                propertiesManager.setProperties(properties);
+                propertiesManager.setConfigPath(selectedFilePath.get());
+                eventBus.publish(new PropertiesLoadedEvent());
             }
 
             else
             {
-                GlobalEventBus.getInstance().post(new PropertiesFileLoadedEvent(true, "Loaded properties", properties));
-
+                eventBus.publish(new ErrorEvent("Properties could not be loaded; is the file correct?"));
             }
 
         } catch (IOException e) {
-            System.out.println(e.getMessage());
-            GlobalEventBus.getInstance().post(new PropertiesFileLoadedEvent(false, "IO error", null));
+            eventBus.publish(new ErrorEvent("Properties could not be loaded; IO exception"));
         }
 
     }
@@ -116,7 +115,7 @@ public class PropertiesWindowController {
                 "projectID",
                 "vmZone",
                 "vmInstanceName",
-                "dbDownloadJSON",
+                "dbAPIKey",
                 "dbServiceInstanceID",
                 "dbEndpointURL",
                 "dbLocation",
@@ -128,7 +127,6 @@ public class PropertiesWindowController {
             } else {
                 String value = properties.getProperty(key);
                 if (value == null || value.trim().isEmpty()) {
-                    System.out.println("Empty value for key: " + key);
                     return false;
                 }
             }
@@ -136,6 +134,43 @@ public class PropertiesWindowController {
 
         return true;
     }
+    public void setEventBus(EventBus eventBus)
+    {
+        this.eventBus = eventBus;
+    }
 
+    public void setPropertiesManager(PropertiesManager propertiesManager)
+    {
+        this.propertiesManager = propertiesManager;
+    }
+
+    public void setApplicationState(ApplicationState applicationState)
+    {
+        this.applicationState = applicationState;
+
+        // Setup the initial state
+        updateUIBasedOnState(applicationState.getCurrentState());
+
+        // Listen to future changes
+        applicationState.addStateChangeListener((observable, oldValue, newValue) -> updateUIBasedOnState(newValue));
+
+    }
+
+    private void updateUIBasedOnState(ApplicationState.State newValue)
+    {
+        switch (newValue)
+        {
+            case INIT, PROPERTIES_SELECTED -> {
+                selectFileTextField.setDisable(false);
+                loadFileButton.setDisable(true);
+            }
+
+            case PROCESSING -> {
+                selectFileTextField.setDisable(true);
+                loadFileButton.setDisable(true);
+            }
+
+        }
+    }
 
 }
